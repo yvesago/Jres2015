@@ -1,0 +1,108 @@
+####################################################
+#
+# Un exemple complet à copier / coller ;-)
+#
+####################################################
+
+# extraction classique des éléments à étudier
+$ grep 'for invalid user' /var/log/auth.log | 
+   awk -F' ' '{print $1" "$2" "$3","$11","$13}' > auth-ssh.log
+# éventuellement "| sed s/Nov/nov./" pour obtenir le bon format de date
+
+$ R
+
+# ===========================================
+
+lg <- read.csv("auth-ssh.log", header = FALSE)
+lg$time <- as.POSIXct(strptime(lg$V1,"%b %d %H:%M:%S"))
+lg$V1 <- NULL # la colonne V1 est maintenant inutile
+
+library(data.table)   # data.table simplifie un peu la syntaxe
+lg <- data.table(lg)
+
+colnames(lg) <- c("login","ip","time") # on renomme, c'est plus joli
+
+summary(lg)
+
+
+# Scatterplot
+# ===========
+source("pannels.R")
+
+pairs(lg, lower.panel = panel.smooth, upper.panel = panel.cor,
+   diag.panel  = panel.hist)
+
+# Tableaux de fréquence triées
+# ============================
+
+#  login cherchés :
+sort( table(lg$login) )
+
+#  IPs :
+sort( table(lg$ip) )
+
+# tableau de fréquence découpé par jour
+table( cut(lg$time,breaks="days") )
+
+# Clustering
+# ==========
+
+# igraph
+library(igraph)
+source("Pretty-tree.R")
+
+pretty_tree(table(lg$ip,lg$login),num_clusters = 10,dist_method="bin")
+
+
+# Arbre de décision
+library(rpart.plot)
+
+arbre  <- rpart(ip ~ op,log)   # IPs par opérations
+arbre2 <- rpart(op ~ ip,lg)    # opérations par IPs
+
+# affichage type 5
+prp(arbre, branch.type=5, faclen=0, varlen=0, yesno=FALSE)
+
+# affichage type 4
+#  fonction de traitement des labels
+split.fun <- function(x, labs, digits, varlen, faclen)
+               {gsub(" = ",":\n",labs)}
+prp(arbre2,type=4,extra=100,split.fun=split.fun,tweak=.8,varlen=0,faclen=0)
+
+
+# Fréquences
+# ==========
+
+for (l in levels(lg$login)) {lg[login==l,diff := c(0,diff(time))]}
+
+# sélection des 18 comptes les plus accédés
+t <- names(head(sort(table(lg$login), decreasing = T),18))
+
+# grille d'affichage
+par(mfrow=c(6,3))
+
+# traitement
+for ( l in t) {
+ ts <- lg[login==l]
+ f <- ts[,list(time,diff)]
+ d <- density(as.numeric(f$diff))
+ m <- which.max(d$y)
+ plot(d,main=l)
+ abline(v=d$x[m], col = "red", lty = "dotted", lwd=2)
+ text(d$x[m],0,round(d$x[m],1),col="red",cex=1.5)
+}
+
+# calculate turning points (extrema)
+require(pastecs)
+
+ts <- lg[login=="admin"]
+f <- ts[,list(time,diff)]
+d <- density(f$diff)
+ts_y<-ts(d$y)
+
+tp<-turnpoints(ts_y)
+plot(d,main="admin")
+points(d$x[tp$tppos[c(1,3,5,7,9)]],d$y[tp$tppos[c(1,3,5,7,9)]],col="red")
+abline(v=d$x[tp$tppos[c(1,3,5,7,9)]], col = "red", lty = "dotted", lwd=2)
+text(d$x[tp$tppos[c(1,3,5,7,9)]],0,round(d$x[tp$tppos[c(1,3,5,7,9)]],1),col="red",cex=1.5)
+
